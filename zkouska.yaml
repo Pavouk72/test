@@ -1,0 +1,84 @@
+blueprint:
+  name: Plán zapnutí - vypnutí s trváním stavu
+  description: Jednoduchý rozvrh zapnutí a vypnutí s přidáním stálosti stavu napříč
+     rušivé události, zajišťující, že cílové zařízení je vždy v očekávaném stavu.
+  source_url: https://github.com/EPMatt/awesome-ha-blueprints/blob/main/blueprints/automation/on_off_schedule_state_persistence/on_off_schedule_state_persistence.yaml
+  domain: automation
+  input:
+    automation_target:
+      name: Cíl Automatizace
+      description: Cíl, který bude automatizace zapínat a vypínat na základě
+         poskytnutý časů.
+      selector:
+        target: {}
+    on_time:
+      name: Čas Zapnutí
+      description: Čas, kdy by měl být cíl přepnut do zapnutého stavu.
+      default: 00:00
+      selector:
+        time: {}
+    off_time:
+      name: Čas Vypnutí
+      description: Čas, kdy by měl být cíl přepnut do vypnutého stavu.
+      default: 00:00
+      selector:
+        time: {}
+    custom_trigger_event:
+      name: Pracovni dny
+      description: Zadej binary_sensor pro pracovní dny
+      selector:
+        entity:
+          domain: binary_sensor
+    active_when:
+      name: Automatizace se použije, když je příznak aktivity roven
+      description: Výběr, zda je automatizace aktivní při hodnotě příznaku ON nebo OFF
+      selector:
+        select:
+          options:
+          - 'on'
+          - 'off'
+    trigger_at_homeassistant_startup:
+      name: Spustit při spuštění Home Assistant
+      description: Spusťte kontrolu a vynucení cílového stavu v Home Assistant
+         spuštění.
+      default: false
+      selector:
+        boolean: {}
+variables:
+  off_time: !input 'off_time'
+  on_time: !input 'on_time'
+  trigger_at_homeassistant_startup: !input 'trigger_at_homeassistant_startup'
+  time_fmt: '%H:%M:%S'
+  first_event: '{{ on_time if strptime(on_time,time_fmt).time() < strptime(off_time,time_fmt).time()
+    else off_time }}'
+  second_event: '{{ on_time if strptime(on_time,time_fmt).time() >= strptime(off_time,time_fmt).time()
+    else off_time }}'
+mode: single
+max_exceeded: silent
+trigger:
+- platform: time
+  at:
+  - !input 'on_time'
+  - !input 'off_time'
+- platform: homeassistant
+  event: start
+- platform: event
+  event_type: !input 'custom_trigger_event'
+condition:
+- condition: template
+  value_template: '{{ trigger.platform!="homeassistant" or trigger_at_homeassistant_startup
+    }}'
+action:
+- choose:
+  - conditions:
+#    - condition: trigger
+#      id: custom_trigger_event
+    - condition: template
+      value_template: '{{ now().time() >= strptime(first_event,time_fmt).time() and
+        now().time() < strptime(second_event,time_fmt).time() }}'
+    sequence:
+    - service: homeassistant.{{ "turn_on" if first_event == on_time else "turn_off"}}
+      target: !input 'automation_target'
+  default:
+  - service: homeassistant.{{ "turn_on" if second_event == on_time else "turn_off"}}
+    target: !input 'automation_target'
